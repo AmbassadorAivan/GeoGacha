@@ -5,7 +5,20 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { MapPin, Wallet, Satellite, Settings, HelpCircle, Star, Sparkles, Trophy, Gift } from "lucide-react"
+import {
+  MapPin,
+  Wallet,
+  Satellite,
+  Settings,
+  HelpCircle,
+  Star,
+  Sparkles,
+  Trophy,
+  Gift,
+  ExternalLink,
+  Zap,
+} from "lucide-react"
+import { connectWallet, generateRandomReward, checkBalance, FLOW_EVM_TESTNET } from "@/lib/web3"
 
 // Mock data for Gacha Points
 const gachaPoints = [
@@ -59,8 +72,11 @@ export default function GeoGachaApp() {
   const [revealedReward, setRevealedReward] = useState(null)
   const [nearbyPoint, setNearbyPoint] = useState(null)
   const [gpsStatus, setGpsStatus] = useState("connected")
-  const [walletStatus, setWalletStatus] = useState("connected")
+  const [walletStatus, setWalletStatus] = useState("disconnected")
+  const [walletAddress, setWalletAddress] = useState("")
+  const [balance, setBalance] = useState("0")
   const [showConfetti, setShowConfetti] = useState(false)
+  const [isConnecting, setIsConnecting] = useState(false)
 
   // Simulate GPS proximity detection
   useEffect(() => {
@@ -68,35 +84,89 @@ export default function GeoGachaApp() {
     setNearbyPoint(nearby)
   }, [])
 
+  // Check wallet connection on load
+  useEffect(() => {
+    checkWalletConnection()
+  }, [])
+
+  const checkWalletConnection = async () => {
+    if (typeof window !== "undefined" && window.ethereum) {
+      try {
+        const accounts = await window.ethereum.request({ method: "eth_accounts" })
+        if (accounts.length > 0) {
+          setWalletAddress(accounts[0])
+          setWalletStatus("connected")
+
+          const balanceInfo = await checkBalance()
+          setBalance(balanceInfo.balance)
+        }
+      } catch (error) {
+        console.error("Failed to check wallet connection:", error)
+      }
+    }
+  }
+
+  const handleConnectWallet = async () => {
+    setIsConnecting(true)
+    try {
+      const { address } = await connectWallet()
+      setWalletAddress(address)
+      setWalletStatus("connected")
+
+      const balanceInfo = await checkBalance()
+      setBalance(balanceInfo.balance)
+    } catch (error) {
+      console.error("Failed to connect wallet:", error)
+      setWalletStatus("disconnected")
+    } finally {
+      setIsConnecting(false)
+    }
+  }
+
   const handleCheckIn = async () => {
     if (!nearbyPoint) return
 
     setIsCheckInOpen(true)
     setIsRevealing(true)
 
-    // Simulate Chainlink VRF call and reward generation
-    setTimeout(() => {
-      const rewards = [
-        { name: "Explorer's Compass", rarity: "common", isNew: true },
-        { name: "Mystic Crystal", rarity: "rare", isNew: true },
-        { name: "Dragon Scale Fragment", rarity: "legendary", isNew: true },
-      ]
+    try {
+      // Call your deployed contract for random reward generation
+      const reward = await generateRandomReward()
 
-      const randomReward = rewards[Math.floor(Math.random() * rewards.length)]
-      setRevealedReward(randomReward)
-      setIsRevealing(false)
+      // Simulate some delay for better UX
+      setTimeout(() => {
+        setRevealedReward(reward)
+        setIsRevealing(false)
 
-      if (randomReward.rarity !== "common") {
-        setShowConfetti(true)
-        setTimeout(() => setShowConfetti(false), 3000)
-      }
-    }, 2000)
+        if (reward.rarity !== "common") {
+          setShowConfetti(true)
+          setTimeout(() => setShowConfetti(false), 3000)
+        }
+      }, 2000)
+    } catch (error) {
+      console.error("Failed to generate reward:", error)
+      // Fallback reward
+      setTimeout(() => {
+        const fallbackReward = {
+          name: "Explorer's Compass",
+          rarity: "common",
+          isNew: true,
+          contractCall: false,
+        }
+        setRevealedReward(fallbackReward)
+        setIsRevealing(false)
+      }, 2000)
+    }
   }
 
   const closeCheckInModal = () => {
     setIsCheckInOpen(false)
     setRevealedReward(null)
     setIsRevealing(false)
+  }
+
+  const openBlockExplorer = () => {
+    window.open(`${FLOW_EVM_TESTNET.blockExplorer}/address/${walletAddress}`, "_blank")
   }
 
   return (
@@ -154,12 +224,44 @@ export default function GeoGachaApp() {
         <Card className="flex-1 bg-white/80 backdrop-blur-sm border-0 shadow-lg">
           <CardContent className="flex items-center gap-2 p-3">
             <Wallet className={`w-4 h-4 ${walletStatus === "connected" ? "text-green-500" : "text-red-500"}`} />
-            <span className="text-sm font-medium">
-              Wallet: {walletStatus === "connected" ? "Connected" : "Disconnected"}
-            </span>
+            <div className="flex flex-col">
+              <span className="text-sm font-medium">{walletStatus === "connected" ? "Connected" : "Disconnected"}</span>
+              {walletStatus === "connected" && (
+                <div className="flex items-center gap-1">
+                  <span className="text-xs text-gray-500">{Number.parseFloat(balance).toFixed(4)} FLOW</span>
+                  <Button variant="ghost" size="icon" className="h-4 w-4" onClick={openBlockExplorer}>
+                    <ExternalLink className="w-3 h-3" />
+                  </Button>
+                </div>
+              )}
+            </div>
           </CardContent>
         </Card>
       </div>
+
+      {/* Wallet Connection */}
+      {walletStatus === "disconnected" && (
+        <div className="mx-4 mb-4">
+          <Card className="bg-yellow-50 border-yellow-200">
+            <CardContent className="p-4 text-center">
+              <div className="flex items-center justify-center gap-2 mb-2">
+                <Wallet className="w-5 h-5 text-yellow-600" />
+                <span className="font-medium text-yellow-800">Connect Wallet to Play</span>
+              </div>
+              <p className="text-sm text-yellow-700 mb-3">
+                Connect to Flow EVM Testnet to generate on-chain random rewards
+              </p>
+              <Button
+                onClick={handleConnectWallet}
+                disabled={isConnecting}
+                className="bg-yellow-600 hover:bg-yellow-700"
+              >
+                {isConnecting ? "Connecting..." : "Connect MetaMask"}
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       {/* Map View */}
       <div className="mx-4 mb-4 relative">
@@ -220,17 +322,22 @@ export default function GeoGachaApp() {
       <div className="px-4 mb-6">
         <Button
           onClick={handleCheckIn}
-          disabled={!nearbyPoint}
+          disabled={!nearbyPoint || walletStatus === "disconnected"}
           className={`w-full h-14 text-lg font-bold rounded-2xl shadow-xl transition-all ${
-            nearbyPoint
+            nearbyPoint && walletStatus === "connected"
               ? "bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600 animate-pulse"
               : "bg-gray-300 cursor-not-allowed"
           }`}
         >
-          {nearbyPoint ? (
+          {nearbyPoint && walletStatus === "connected" ? (
             <>
-              <MapPin className="w-6 h-6 mr-2" />
+              <Zap className="w-6 h-6 mr-2" />
               Check In at {nearbyPoint.name}
+            </>
+          ) : walletStatus === "disconnected" ? (
+            <>
+              <Wallet className="w-6 h-6 mr-2" />
+              Connect Wallet to Check In
             </>
           ) : (
             <>
@@ -310,11 +417,11 @@ export default function GeoGachaApp() {
                 <div className="w-24 h-24 mx-auto bg-gradient-to-r from-purple-500 to-pink-500 rounded-full flex items-center justify-center animate-spin">
                   <Gift className="w-12 h-12 text-white" />
                 </div>
-                <p className="text-gray-600">Chainlink VRF is generating your random reward...</p>
+                <p className="text-gray-600">Calling your Flow EVM contract for random reward...</p>
                 <div className="text-xs text-gray-400 space-y-1">
                   <p>• Validating GPS coordinates</p>
-                  <p>• Requesting randomness from Chainlink</p>
-                  <p>• Minting reward on-chain</p>
+                  <p>• Calling RandomnessWTF contract</p>
+                  <p>• Generating on-chain randomness</p>
                 </div>
               </div>
             ) : revealedReward ? (
@@ -329,6 +436,12 @@ export default function GeoGachaApp() {
                   <Badge className={`${rarityColors[revealedReward.rarity]} text-white capitalize`}>
                     {revealedReward.rarity}
                   </Badge>
+                  {revealedReward.contractCall && (
+                    <div className="flex items-center justify-center gap-1 mt-2">
+                      <Zap className="w-4 h-4 text-green-500" />
+                      <span className="text-xs text-green-600">Generated on Flow EVM</span>
+                    </div>
+                  )}
                 </div>
                 {revealedReward.rarity !== "common" && (
                   <p className="text-sm text-purple-600 font-medium">
@@ -343,30 +456,6 @@ export default function GeoGachaApp() {
           </div>
         </DialogContent>
       </Dialog>
-
-      {/* Integration Comments */}
-      <div className="hidden">
-        {/* 
-        TODO: Integration placeholders
-        
-        Chainlink VRF Integration:
-        - Import @chainlink/contracts for VRF functionality
-        - Implement requestRandomWords() for reward generation
-        - Handle fulfillRandomWords() callback for reward distribution
-        
-        GPS Validation Logic:
-        - Use navigator.geolocation.getCurrentPosition()
-        - Implement haversine formula for distance calculation
-        - Add geofencing validation for check-in radius
-        - Store validated coordinates on-chain for proof
-        
-        Web3 Integration:
-        - Connect to MetaMask/WalletConnect
-        - Deploy ERC-721 contract for NFT rewards
-        - Implement minting functions with rarity weights
-        - Add transaction confirmation flows
-        */}
-      </div>
     </div>
   )
 }
